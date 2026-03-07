@@ -3,10 +3,11 @@
 namespace Sitelease\AspectRatioValidator;
 
 use SilverStripe\Assets\Upload_Validator;
+use SilverStripe\MimeValidator\MimeUploadValidator;
 use SilverStripe\Core\Config\Configurable;
 use Sitelease\AspectRatioValidator\AspectRatioValidatorFailedException;
 
-class AspectRatioValidator extends Upload_Validator
+class AspectRatioValidator extends MimeUploadValidator
 {
     use Configurable;
 
@@ -16,11 +17,35 @@ class AspectRatioValidator extends Upload_Validator
      *
      * @var array
      */
-    public array $allowedAspectRatios = [];
+    protected array $allowedAspectRatios = [];
 
-    public function __construct(array $allowedAspectRatios = [])
+    /**
+     * Returns an array of valid aspect ratios
+     *
+     * @return array
+     */
+    public function getAllowedAspectRatios(): array
     {
-        $this->allowedAspectRatios = $allowedAspectRatios;
+        return $this->allowedAspectRatios;
+    }
+
+    /**
+     * Set the array of valid aspect ratios
+     *
+     * @return self
+     */
+    public function setAllowedAspectRatios(array $ratios)
+    {
+        $this->allowedAspectRatios = $ratios;
+        return $this;
+    }
+
+    public function __construct(?Upload_Validator $validator)
+    {
+        if ($validator) {
+            $this->setAllowedExtensions($validator->getAllowedExtensions());
+            $this->setAllowedMaxFileSize($validator->allowedMaxFileSize);
+        }
     }
 
     /**
@@ -50,23 +75,6 @@ class AspectRatioValidator extends Upload_Validator
     }
 
     /**
-     * Accepts an image's height and width and returns
-     * a reduced aspect ratio
-     *
-     * @return string Aspect ratio (e.g. 500px by 500px would return "1x1")
-     */
-    public function getAspectRatio(int $width, int $height): string
-    {
-        $greatestCommonDivisor = static function ($width, $height) use (&$greatestCommonDivisor) {
-            return ($width % $height) ? $greatestCommonDivisor($height, $width % $height) : $height;
-        };
-
-        $divisor = $greatestCommonDivisor($width, $height);
-
-        return $width / $divisor . 'x' . $height / $divisor;
-    }
-
-    /**
      * Returns true if the uploaded image has a valid aspect ratio.
      * Otherwise throws a validation error
      *
@@ -84,11 +92,21 @@ class AspectRatioValidator extends Upload_Validator
             );
         }
 
-        $aspectRatio = $this->getAspectRatio($imageDetails['width'], $imageDetails['height']);
-        if (!in_array($aspectRatio, $allowedAspectRatios)) {
+        $ratioIsValid = false;
+        $imageRatioDecimal = number_format($imageDetails['width'] / $imageDetails['height'], 2);
+        foreach ($allowedAspectRatios as $ratio) {
+            $ratioParts = explode("x", $ratio);
+            $ratioDecimal = number_format($ratioParts[0] / $ratioParts[1], 2);
+
+            if ($imageRatioDecimal === $ratioDecimal) {
+                $ratioIsValid = true;
+                break;
+            }
+        }
+
+        if (!$ratioIsValid) {
             throw new AspectRatioValidatorFailedException(
-                _t(__CLASS__.'.InvalidAspectRatio', 'Image has an aspect ratio of {aspectRatio} which is not a valid aspect ratio ({validRatios})', [
-                    'aspectRatio' => $aspectRatio,
+                _t(__CLASS__ . '.InvalidAspectRatio', 'Image aspect ratio invalid (must be: {validRatios})', [
                     'validRatios' => join(', ', $allowedAspectRatios)
                 ])
             );
